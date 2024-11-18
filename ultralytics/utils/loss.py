@@ -3,11 +3,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
+from ultralytics.utils import yaml_load
 
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
@@ -161,9 +163,17 @@ class v8DetectionLoss:
         """Initializes v8DetectionLoss with the model, defining model-related properties and BCE loss function."""
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
-
         m = model.model[-1]  # Detect() module
-        self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        
+        data = yaml_load(h.data)
+
+        if("weights" in data):
+            weights_list = np.array(yaml_load(h.data)["weights"])
+            self.weights = torch.from_numpy(weights_list).to(device)
+            self.bce = nn.BCEWithLogitsLoss(reduction="none", pos_weight=self.weights)
+        else:
+            self.bce = nn.BCEWithLogitsLoss(reduction="none")
+
         self.hyp = h
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
@@ -258,6 +268,7 @@ class v8DetectionLoss:
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
 
+        print(loss[1])
         return loss.sum() * batch_size, loss.detach()  # loss(box, cls, dfl)
 
 
